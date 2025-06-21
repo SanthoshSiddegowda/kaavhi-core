@@ -1,0 +1,20 @@
+name: Gitleaks
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+jobs:
+  scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          # This token is provided by Actions, and is needed for the action to post comments on pull requests.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # Only required for Organizations, not personal accounts. 
