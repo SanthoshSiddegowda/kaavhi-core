@@ -33,7 +33,8 @@ async def review_with_gemini(diff: str) -> str:
             "* comment: A short, clear explanation of the issue or suggestion.\n"
             "* suggestion: strictly only code snippet (no explanation or wrapping)\n"
             "* confidence: A number (0–100) showing how sure you are about your comment.\n"
-            "* filePath: The path of the changed file (from the +++ line in the diff).\n\n"
+            "* filePath: The path of the changed file (from the +++ line in the diff).\n"
+            "* language: The programming language of the file (e.g., 'python', 'javascript').\n\n"
             "---\n\n"
             "### Example Output\n\n"
             "{\n  \"comments\": [\n    {\n      \"id\": \"1\",\n      \"type\": \"issue\",\n      \"severity\": \"high\",\n      \"line\": 428,\n      \"code\": \"$response = json_decode( $this->httpPost('salemansalesreturns/updateSaleReturnStatus'), true );\",\n      \"comment\": \"This code is forwarding a request but seems to skip access control checks. That might let unauthenticated users trigger it.\",\n      \"suggestion\": \"if (!is_authorized_user()) {\\n  return new CakeResponse(array('body' => json_encode(['Result' => false, 'Reason' => 'Unauthorized'])));\\n}\",\n      \"confidence\": 95,\n      \"filePath\": \"app/Controller/SalesreturnsController.php\"\n    },\n    {\n      \"id\": \"2\",\n      \"type\": \"suggestion\",\n      \"severity\": \"low\",\n      \"line\": 422,\n      \"code\": \"public function updateSaleReturnStatus( $responsetype = 'json' )\",\n      \"comment\": \"The 'responsetype' parameter is not used in the function. It can be removed to simplify the code.\",\n      \"suggestion\": \"public function updateSaleReturnStatus()\",\n      \"confidence\": 90,\n      \"filePath\": \"app/Controller/SalesreturnsController.php\"\n    }\n  ]\n}\n\n"
@@ -42,7 +43,7 @@ async def review_with_gemini(diff: str) -> str:
             f"{diff}\n"
         )
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-2.5-pro",
             contents=prompt
         )
         text = response.text.strip()

@@ -7,12 +7,13 @@ router = APIRouter(prefix="/review", tags=["review"])
 
 @router.post("/diff", response_model=ReviewResponse, status_code=status.HTTP_200_OK)
 async def review_diff(
-    request: ReviewRequest
+    file: UploadFile = File(...)
 ) -> ReviewResponse:
     """
-    Accepts a diff as a string and returns review comments.
+    Accepts a diff file and returns review comments.
     """
-    review_json = await review_diff_with_gemini(request.diff)
+    diff = (await file.read()).decode("utf-8")
+    review_json = await review_diff_with_gemini(diff)
     try:
         comments = [ReviewComment(**c) for c in review_json.get("comments", [])]
     except Exception as e:
