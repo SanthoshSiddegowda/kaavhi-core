@@ -12,7 +12,10 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:8080",
         "https://kaavhi.com",
-        "https://*.kaavhi.com"
+        "https://bizom.kaavhi.com",
+        "https://app.kaavhi.com",
+        "https://api.kaavhi.com",
+        "https://www.kaavhi.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
