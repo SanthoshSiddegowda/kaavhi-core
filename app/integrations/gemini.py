@@ -43,7 +43,7 @@ async def review_with_gemini(diff: str) -> str:
             f"{diff}\n"
         )
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.1-pro-preview",
             contents=prompt
         )
         text = response.text.strip()
