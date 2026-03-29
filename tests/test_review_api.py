@@ -24,9 +24,20 @@ async def test_review_diff_success(mock_review_diff_with_gemini):
                 "comment": "This is a test comment.",
                 "suggestion": "const a = 2;",
                 "confidence": 95,
-                "filePath": "test.js"
+                "filePath": "test.js",
             }
-        ]
+        ],
+        "summary": {
+            "overview": (
+                "This change updates a number in test.js—probably to match new expected output."
+            ),
+            "keyChanges": [
+                "Updates literal in `test.js` from `1` to `2`",
+            ],
+            "focus": [
+                "Confirm the new value matches intended behavior and any related assertions.",
+            ],
+        },
     }
 
     # Act: Call the API endpoint
@@ -38,4 +49,12 @@ async def test_review_diff_success(mock_review_diff_with_gemini):
     assert "comments" in response_data
     assert len(response_data["comments"]) == 1
     assert response_data["comments"][0]["id"] == "1"
-    assert response_data["comments"][0]["comment"] == "This is a test comment." 
+    assert response_data["comments"][0]["comment"] == "This is a test comment."
+    assert "summary" in response_data
+    assert response_data["summary"]["overview"].startswith("This change updates")
+    assert response_data["summary"]["keyChanges"] == [
+        "Updates literal in `test.js` from `1` to `2`",
+    ]
+    assert response_data["summary"]["focus"] == [
+        "Confirm the new value matches intended behavior and any related assertions.",
+    ]

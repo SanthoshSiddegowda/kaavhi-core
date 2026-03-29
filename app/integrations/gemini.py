@@ -1,59 +1,104 @@
-import os
+from textwrap import dedent
+from typing import Any
+
 from google import genai
-import json
-import re
+from google.genai import types
+from pydantic import ValidationError
+
 from app.config.app import settings
+from app.models.review import ReviewResponse
 
 # The client is initialized here using the key from the centralized settings.
 # Pydantic automatically validates that the key exists.
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
-async def review_with_gemini(diff: str) -> str:
+_EMPTY_SUMMARY: dict[str, Any] = {"overview": "", "keyChanges": [], "focus": []}
+
+
+def _response_to_review_dict(response: Any) -> dict[str, Any]:
+    """Normalize generate_content response into a plain dict for the review API."""
+    try:
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, ReviewResponse):
+            return parsed.model_dump()
+        if isinstance(parsed, dict):
+            return ReviewResponse.model_validate(parsed).model_dump()
+
+        text = (response.text or "").strip()
+        if not text:
+            return {"comments": [], "summary": _EMPTY_SUMMARY}
+        return ReviewResponse.model_validate_json(text).model_dump()
+    except ValidationError:
+        return {"comments": [], "summary": _EMPTY_SUMMARY}
+
+
+async def review_with_gemini(diff: str) -> dict[str, Any]:
     """
-    Uses Gemini 2.5 Pro to review the provided diff and returns the review comments as a JSON string.
+    Reviews the diff with Gemini and returns a dict matching ``ReviewResponse``
+    (line comments plus ``summary`` for the AI Pull Request overview; shape from ``response_schema``).
     """
-    import asyncio
-    loop = asyncio.get_event_loop()
-    def sync_call():
-        prompt = (
-            "AI Code Reviewer Prompt for Kaavhi.com\n\n"
-            "You're an AI code reviewer helping developers write better, safer, and cleaner code. Your job is to look at the code changes (diff) below and leave helpful review comments, just like a thoughtful human reviewer would.\n\n"
-            "### What to do:\n"
-            "1. **Read the Diff:** Go through the code  changes carefully. Look for potential bugs, security issues, slow code, unclear logic, bad practices, or style problems.\n\n"
-            "2. **Find the File Path:** Each change will include file paths like `--- a/path/to/file` and `+++ b/path/to/file`. Use the `+++` (new file) path in your output.\n\n"
-            "3. **Leave Comments in JSON Format:** Your response should be a single JSON object with a 'comments' array. Each comment should follow the structure below. The 'suggestion' field must contain only a raw code snippet.\n\n"
-            "---\n\n"
-            "### Comment Format (Schema)\n\n"
-            "Each comment in the 'comments' array should follow this structure:\n\n"
-            "* id: A unique string like '1', '2', etc.\n"
-            "* type: 'issue' if it's a problem or 'suggestion' if it's an improvement.\n"
-            "* severity: One of 'high', 'medium', or 'low' based on how serious the issue is.\n"
-            "* line: The line number (from the + side of the diff) where the issue appears.\n"
-            "* code: The exact line or block of code you're commenting on.\n"
-            "* comment: A short, clear explanation of the issue or suggestion.\n"
-            "* suggestion: strictly only code snippet (no explanation or wrapping)\n"
-            "* confidence: A number (0–100) showing how sure you are about your comment.\n"
-            "* filePath: The path of the changed file (from the +++ line in the diff).\n"
-            "* language: The programming language of the file (e.g., 'python', 'javascript').\n\n"
-            "---\n\n"
-            "### Example Output\n\n"
-            "{\n  \"comments\": [\n    {\n      \"id\": \"1\",\n      \"type\": \"issue\",\n      \"severity\": \"high\",\n      \"line\": 428,\n      \"code\": \"$response = json_decode( $this->httpPost('salemansalesreturns/updateSaleReturnStatus'), true );\",\n      \"comment\": \"This code is forwarding a request but seems to skip access control checks. That might let unauthenticated users trigger it.\",\n      \"suggestion\": \"if (!is_authorized_user()) {\\n  return new CakeResponse(array('body' => json_encode(['Result' => false, 'Reason' => 'Unauthorized'])));\\n}\",\n      \"confidence\": 95,\n      \"filePath\": \"app/Controller/SalesreturnsController.php\"\n    },\n    {\n      \"id\": \"2\",\n      \"type\": \"suggestion\",\n      \"severity\": \"low\",\n      \"line\": 422,\n      \"code\": \"public function updateSaleReturnStatus( $responsetype = 'json' )\",\n      \"comment\": \"The 'responsetype' parameter is not used in the function. It can be removed to simplify the code.\",\n      \"suggestion\": \"public function updateSaleReturnStatus()\",\n      \"confidence\": 90,\n      \"filePath\": \"app/Controller/SalesreturnsController.php\"\n    }\n  ]\n}\n\n"
-            "---\n\n"
-            "Paste your code diff below to get started:\n\n"
-            f"{diff}\n"
-        )
-        response = client.models.generate_content(
+    instructions = dedent(
+        """
+        You are a senior code reviewer for Kaavhi. The reader only sees this unified diff—often
+        without a separate PR description—so give them an executive briefing **and** line-level findings.
+
+        ## Priorities (in order)
+        Correctness and security, breaking changes and API contracts, data integrity, performance
+        traps, tests and error handling, then clarity and maintainability. Ignore pure formatting
+        unless it hides a real problem.
+
+        ## `summary` (PR overview for the reviewer)
+        Fills the **AI Pull Request Summary**: plain language first, then detail, then where to dig in.
+        - **overview**: 2–4 short sentences, simple and self-explanatory. State what the PR does in
+          everyday terms so a busy reviewer grasps the change in one read. No fluff; stick to the diff.
+        - **keyChanges**: 3–10 tight bullets—what changed (paths, exports, config, behavior). Factual
+          only. **Do not** repeat or paraphrase **comments**.
+        - **focus**: 2–8 bullets telling the reviewer **what to examine most carefully**—highest-risk
+          hunks, tricky logic, security- or data-sensitive spots, API or contract changes, missing
+          tests, or anything that deserves a deeper pass than the rest of the diff.
+
+        ## Comments (line-level)
+        - **filePath**: From the `+++ b/path/to/file` header for that hunk, use `path/to/file`
+          (the segment after `b/`, i.e. repo-relative).
+        - **line**: Line number in the **new** file (the right-hand side of the hunk: lines that
+          start with `+` or unchanged context ` `; pick the best single line for the issue).
+        - **code**: A minimal excerpt from the new version you are discussing.
+        - **comment**: Clear, specific, actionable prose. Say *why* it matters when non-obvious.
+        - **suggestion**: Replacement code only—no backticks wrapping the whole answer, no
+          markdown fences, no “consider doing…” prose. If code is not the right fix, give the
+          smallest sensible snippet or the corrected line.
+        - **type**: `issue` for defects or material risk; `suggestion` for improvements that are not
+          strictly wrong.
+        - **severity**: `high` (security, data loss, crashes, major bugs); `medium` (likely bugs,
+          fragile contracts); `low` (minor clarity, style).
+        - **confidence**: 0–100; lower when you are inferring.
+        - **One comment per location**: If several findings target the same **filePath** and **line**,
+          merge them into a **single** comment. Combine the points in **comment** (concise bullets or
+          short paragraphs). Set **type** to `issue` if any merged point is a defect; otherwise
+          `suggestion`. **severity** = highest among the merged points; **confidence** = minimum of
+          the merged points if they mixed strong and weak evidence. **suggestion** should be one
+          consolidated code fix when possible; if not, use the fix for the most severe issue and
+          describe the rest only in **comment**.
+
+        Prefer fewer, higher-signal comments over commenting on every hunk. Trivial or cosmetic-only
+        diffs may warrant an empty `comments` list.
+
+        Output structure is fixed by the API; follow it exactly.
+        """
+    ).strip()
+
+    prompt = f"{instructions}\n\n---\n\n## Diff\n\n{diff}\n"
+
+    try:
+        response = await client.aio.models.generate_content(
             model="gemini-3-flash-preview",
-            contents=prompt
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=ReviewResponse,
+            ),
         )
-        text = response.text.strip()
-        # Remove any code block markers (```json, ```code, or ```) from the start and end
-        text = re.sub(r'^```[a-zA-Z]*\s*', '', text)
-        text = re.sub(r'```$', '', text)
-        print(text)
-        # Try to parse the response as JSON
-        try:
-            return json.loads(text)
-        except Exception:
-            return {"comments": []}
-    return await loop.run_in_executor(None, sync_call) 
+        return _response_to_review_dict(response)
+    except Exception as e:
+        print(f"Error calling Gemini: {e}")
+        return {"comments": [], "summary": _EMPTY_SUMMARY}
