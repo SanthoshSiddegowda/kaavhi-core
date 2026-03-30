@@ -8,98 +8,139 @@ As part of our commitment to transparency and trust, our core review logic is op
 
 ## How It Works
 
-The backend provides a single API endpoint that accepts a code diff and returns a structured JSON object containing AI-generated review comments.
+1. **Receive diff**: The API accepts a unified diff as an **uploaded file** (`multipart/form-data`).
+2. **AI analysis**: The diff is sent to **Google Gemini** using the official [`google-genai`](https://googleapis.github.io/python-genai/) SDK (async). The model returns **structured JSON** constrained by Pydantic schemas: an **AI Pull Request Summary** plus **line-level comments**.
+3. **Return JSON**: The response includes `summary` (overview, key changes, review focus) and `comments` (issues and suggestions with severity, confidence, and code suggestions).
 
-1.  **Receive Diff**: The API receives a code diff as a string.
-2.  **AI Analysis**: The diff is sent to Google's Gemini 2.5 Pro model with a detailed prompt instructing it to act as an expert code reviewer.
-3.  **Return JSON**: The model's response is parsed and returned as a structured JSON array of review comments.
+Default model id is configured in `app/integrations/gemini.py` (currently `gemini-3-flash-preview`). You can change it there to match your API access.
 
 ## Getting Started
 
 ### Prerequisites
 
-*   Python 3.9+
-*   A [Gemini API Key](https://ai.google.dev/gemini-api/docs/api-key)
+- Python 3.9+
+- A [Gemini API key](https://ai.google.dev/gemini-api/docs/api-key)
 
 ### Installation
 
-1.  **Clone the repository:**
-    ```sh
-    git clone git@github.com:SanthoshSiddegowda/kaavhi-core.git
-    cd kaavhi-core
-    ```
+1. **Clone the repository:**
 
-2.  **Create a virtual environment and install dependencies:**
-    ```sh
-    python -m venv venv
-    source venv/bin/activate
-    pip install -r requirements.txt
-    ```
+   ```sh
+   git clone git@github.com:SanthoshSiddegowda/kaavhi-core.git
+   cd kaavhi-core
+   ```
 
-3.  **Set up your environment variables:**
-    Create a `.env` file in the project root and add your Gemini API key:
-    ```
-    GEMINI_API_KEY="your-gemini-api-key"
-    ```
+2. **Create a virtual environment and install dependencies:**
+
+   ```sh
+   python -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+3. **Set up environment variables**
+
+   Create a `.env` file in the project root:
+
+   ```env
+   GEMINI_API_KEY="your-gemini-api-key"
+   ```
 
 ### Running the Server
-
-Use `uvicorn` to run the FastAPI server locally:
 
 ```sh
 uvicorn app.main:app --reload
 ```
 
-The server will be available at `http://localhost:8000`.
+The server listens at `http://localhost:8000`.
 
 ## API Usage
 
-### Endpoint: `/review/diff`
+### `POST /review/diff`
 
-*   **Method**: `POST`
-*   **Body**:
+Accepts a **file** field containing the diff text (not a JSON body).
 
-    ```json
+| Item | Value |
+|------|--------|
+| Method | `POST` |
+| Content-Type | `multipart/form-data` |
+| Field | `file` — the `.diff` / patch file |
+
+**Example (curl):**
+
+```sh
+curl -X POST "http://localhost:8000/review/diff" \
+  -F "file=@./my-changes.diff"
+```
+
+**Success response (`200 OK`)**
+
+```json
+{
+  "comments": [
     {
-      "diff": "--- a/file.js\n+++ b/file.js\n@@ -1,3 +1,3 @@\n- const oldVar = 1;\n+ const newVar = 2;"
+      "id": "1",
+      "type": "suggestion",
+      "severity": "low",
+      "line": 3,
+      "code": "+ const newVar = 2;",
+      "comment": "Variable renamed; ensure all references are updated.",
+      "suggestion": "const newVar = 2;",
+      "confidence": 90,
+      "filePath": "src/file.js"
     }
-    ```
+  ],
+  "summary": {
+    "overview": "Short plain-language description of what the PR changes and why it matters.",
+    "keyChanges": [
+      "Renamed a variable in `src/file.js` for clarity."
+    ],
+    "focus": [
+      "Double-check all imports and references to the old name."
+    ]
+  }
+}
+```
 
-*   **Success Response (200 OK)**:
+- **`summary.overview`** — Simple PR-level context for reviewers (especially when there is no PR description).
+- **`summary.keyChanges`** — Factual bullets of what changed.
+- **`summary.focus`** — Areas worth a deeper review (risk, contracts, tricky logic, etc.).
 
-    A JSON object containing an array of review comments.
-    ```json
-    {
-      "comments": [
-        {
-          "id": "1",
-          "type": "suggestion",
-          "severity": "low",
-          "line": 3,
-          "code": "+ const newVar = 2;",
-          "comment": "Variable name changed, ensure this is updated across all usages.",
-          "suggestion": "N/A",
-          "confidence": 90,
-          "filePath": "b/file.js"
-        }
-      ]
-    }
-    ```
+Each comment’s **`filePath`** should be repo-relative, taken from the `+++ b/path/to/file` header in the diff (the path after `b/`).
+
+### `GET /`
+
+Health check — returns `{ "status": "ok" }`.
+
+## CORS
+
+Custom CORS middleware allows:
+
+- `http://localhost:8080` (local frontend)
+- `https://` and `http://` origins on `kaavhi.com` and its subdomains
+
+See `app/middleware/cors.py` to adjust allowed origins.
 
 ## Contributing
 
-We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to get started.
+We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).
 
-## Project Structure
+## Project structure
 
-- `app/` - Main application code
-  - `main.py` - FastAPI app and routes
-  - `__init__.py` - Makes app a package
-- `requirements.txt` - Python dependencies
+- `app/main.py` — FastAPI app, CORS, router mount
+- `app/api/v1/review.py` — `/review/diff` endpoint
+- `app/integrations/gemini.py` — Gemini client, prompt, structured output
+- `app/models/review.py` — Pydantic models (`ReviewResponse`, `PullRequestSummary`, `ReviewComment`)
+- `app/services/review_service.py` — Review orchestration
+- `app/middleware/` — CORS middleware
+- `app/config/` — Settings (e.g. `GEMINI_API_KEY`)
+- `requirements.txt` — Dependencies (`fastapi`, `google-genai`, `python-multipart`, etc.)
+- `tests/` — `pytest` suite
 
-## API
-- `GET /` - Health check endpoint, returns `{ "status": "ok" }` 
+## Releases
+
+See [GitHub Releases](https://github.com/SanthoshSiddegowda/kaavhi-core/releases) for version notes (e.g. **v1.2.0**: summary + focus, structured Gemini output, middleware layout).

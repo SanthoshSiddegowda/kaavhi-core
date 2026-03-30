@@ -10,7 +10,7 @@ router = APIRouter(prefix="/review", tags=["review"])
 @router.post("/diff", response_model=ReviewResponse, status_code=status.HTTP_200_OK)
 async def review_diff(file: UploadFile = File(...)) -> ReviewResponse:
     """
-    Accepts a diff file and returns ``summary`` (overview + keyChanges) and line-level ``comments``.
+    Accepts a diff file and returns ``summary`` (overview, keyChanges, focus) and ``comments``.
     """
     diff = (await file.read()).decode("utf-8")
     review_json = await review_diff_with_gemini(diff)
