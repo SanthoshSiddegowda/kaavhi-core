@@ -40,8 +40,12 @@ async def test_review_diff_success(mock_review_diff_with_gemini):
         },
     }
 
-    # Act: Call the API endpoint
-    response = client.post("/review/diff", json={"diff": "--- a/test.js\n+++ b/test.js\n-const a = 1;\n+const a = 2;"})
+    # Act: Call the API endpoint (multipart file, matching production usage)
+    diff_text = "--- a/test.js\n+++ b/test.js\n-const a = 1;\n+const a = 2;"
+    response = client.post(
+        "/review/diff",
+        files={"file": ("changes.diff", diff_text.encode("utf-8"), "text/plain")},
+    )
 
     # Assert: Check the response
     assert response.status_code == 200

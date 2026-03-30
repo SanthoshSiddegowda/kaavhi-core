@@ -1,6 +1,7 @@
 # Kaavhi AI Code Review Backend
 
 [![Protected by Gitleaks](https://img.shields.io/badge/protected%20by-gitleaks-blue)](https://github.com/gitleaks/gitleaks)
+[![Tests](https://github.com/SanthoshSiddegowda/kaavhi-core/actions/workflows/tests.yml/badge.svg)](https://github.com/SanthoshSiddegowda/kaavhi-core/actions/workflows/tests.yml)
 
 This repository contains the open-source core of [Kaavhi](https://kaavhi.com/), an AI-powered code review assistant. Our mission is to help developers write better, safer, and cleaner code without sacrificing control or data privacy.
 
