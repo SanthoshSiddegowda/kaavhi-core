@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     Manages application settings and environment variables.
     """
     GEMINI_API_KEY: str
+    BUGZILLA_API_KEY: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

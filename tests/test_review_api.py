@@ -64,21 +64,46 @@ async def test_review_diff_success(mock_review_diff_with_gemini):
     ]
 
 
-def test_review_diff_preflight_allows_kaavhi_origin():
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://kaavhi.com",
+        "https://www.kaavhi.com",
+        "https://bitbucket.org",
+        "http://localhost:8080",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+    ],
+)
+def test_review_diff_preflight_allows_known_origins(origin: str):
     response = client.options(
         "/review/diff",
         headers={
-            "Origin": "https://kaavhi.com",
+            "Origin": origin,
             "Access-Control-Request-Method": "POST",
             "Access-Control-Request-Headers": "authorization,content-type",
         },
     )
 
     assert response.status_code == 204
-    assert response.headers["access-control-allow-origin"] == "https://kaavhi.com"
+    assert response.headers["access-control-allow-origin"] == origin
     assert response.headers["access-control-allow-credentials"] == "true"
     assert "POST" in response.headers["access-control-allow-methods"]
     assert (
         response.headers["access-control-allow-headers"]
         == "authorization,content-type"
     )
+
+
+def test_review_diff_preflight_rejects_unknown_origin():
+    response = client.options(
+        "/review/diff",
+        headers={
+            "Origin": "https://evil.com",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.status_code == 204
+    assert "access-control-allow-origin" not in response.headers
+    assert "access-control-allow-credentials" not in response.headers

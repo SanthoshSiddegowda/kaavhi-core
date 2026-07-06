@@ -5,6 +5,8 @@ from starlette.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 _KAAVHI_ORIGIN = re.compile(r"^https?://(?:[a-zA-Z0-9-]+\.)*kaavhi\.com$")
+_BITBUCKET_ORIGIN = re.compile(r"^https://(?:[a-zA-Z0-9-]+\.)*bitbucket\.org$")
+_LOCALHOST_ORIGIN = re.compile(r"^http://(?:localhost|127\.0\.0\.1)(?::\d+)?$")
 
 
 class CustomCORSMiddleware(BaseHTTPMiddleware):
@@ -13,17 +15,20 @@ class CustomCORSMiddleware(BaseHTTPMiddleware):
         return bool(
             origin
             and (
-                origin == "http://localhost:8080" or _KAAVHI_ORIGIN.match(origin)
+                _KAAVHI_ORIGIN.match(origin)
+                or _BITBUCKET_ORIGIN.match(origin)
+                or _LOCALHOST_ORIGIN.match(origin)
             )
         )
 
     @staticmethod
     def _apply_cors_headers(request: Request, response: Response) -> Response:
         origin = request.headers.get("origin")
-        if CustomCORSMiddleware._is_allowed_origin(origin):
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Vary"] = "Origin"
+        if not CustomCORSMiddleware._is_allowed_origin(origin):
+            return response
 
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
         request_headers = request.headers.get("access-control-request-headers")
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"

@@ -117,8 +117,9 @@ Health check — returns `{ "status": "ok" }`.
 
 Custom CORS middleware allows:
 
-- `http://localhost:8080` (local frontend)
+- `http://localhost` and `http://127.0.0.1` on any port (local frontend)
 - `https://` and `http://` origins on `kaavhi.com` and its subdomains
+- `https://` origins on `bitbucket.org` and its subdomains
 
 See `app/middleware/cors.py` to adjust allowed origins.
 
