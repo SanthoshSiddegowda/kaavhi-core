@@ -3,6 +3,7 @@ uvicorn[standard]
 pydantic
 pydantic-settings
 google-genai
+openai
 python-multipart
 python-dotenv
 httpx
