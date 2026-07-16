@@ -19,19 +19,26 @@ def _has_content(review: dict[str, Any]) -> bool:
 
 async def review_diff(diff: str) -> dict[str, Any]:
     """
-    Review a diff. NVIDIA (qwen) is primary; Gemini is the fallback used when NVIDIA
-    is unconfigured, errors (rate limit / no credits / timeout), or returns nothing useful.
+    Review a diff. Gemini is the default provider; NVIDIA (qwen) is a fallback used
+    only when Gemini fails or returns nothing useful AND an NVIDIA key is configured.
     """
-    if settings.NVIDIA_API_KEY:
-        try:
-            review = await review_with_nvidia(diff)
-            if _has_content(review):
-                return review
-            log.warning("NVIDIA returned empty review; falling back to Gemini")
-        except Exception as e:  # noqa: BLE001 — any provider failure should fall back
-            log.warning("NVIDIA review failed (%s); falling back to Gemini", e)
+    try:
+        review = await review_with_gemini(diff)
+        if _has_content(review):
+            return review
+        log.warning("Gemini returned empty review")
+    except Exception as e:  # noqa: BLE001 — any provider failure should fall back
+        log.warning("Gemini review failed (%s)", e)
 
-    return await review_with_gemini(diff)
+    if settings.NVIDIA_API_KEY:
+        log.warning("Falling back to NVIDIA")
+        try:
+            return await review_with_nvidia(diff)
+        except Exception as e:  # noqa: BLE001
+            log.warning("NVIDIA fallback failed (%s)", e)
+
+    # Both unavailable — return an empty, schema-valid review.
+    return {"comments": [], "summary": {"overview": "", "keyChanges": [], "focus": []}}
 
 
 # Backwards-compatible alias (older imports / tests referenced this name).
