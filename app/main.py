@@ -2,7 +2,7 @@ import httpx
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from app.api.v1 import bugzilla, review
+from app.api.v1 import bugzilla, detect_origin, review
 from app.middleware import CustomCORSMiddleware
 
 app = FastAPI()
@@ -11,6 +11,7 @@ app.add_middleware(CustomCORSMiddleware)
 
 app.include_router(review.router)
 app.include_router(bugzilla.router)
+app.include_router(detect_origin.router)
 
 class HealthResponse(BaseModel):
     status: str
