@@ -30,4 +30,12 @@ class DetectOriginResponse(BaseModel):
         description="Author (name or email) of the introducing commit. Empty if unknown.",
     )
     confidence: int = Field(0, ge=0, le=100, description="0-100; low when guessing or signal is weak.")
-    reasoning: str = Field("", description="One or two sentences explaining the choice.")
+    reasoning: str = Field("", description="One or two sentences explaining why this commit was chosen.")
+    cause_summary: str = Field(
+        "",
+        description="How the regression was introduced — the root cause, inferred from the introducing commit and the fix diff. 1-3 plain sentences. Empty if unknown.",
+    )
+    fix_summary: str = Field(
+        "",
+        description="How the fix resolves the issue, from the fix diff. 1-3 plain sentences. Empty if unknown.",
+    )

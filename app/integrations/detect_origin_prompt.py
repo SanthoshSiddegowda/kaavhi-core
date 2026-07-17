@@ -22,6 +22,10 @@ INSTRUCTIONS = dedent(
     - `confidence`: high (70-100) only when a candidate clearly matches the fixed files; medium
       (30-69) when reasonable but uncertain; low (1-29) for weak guesses; 0 when unknown.
     - `reasoning`: one or two sentences, concrete (name the file/overlap), no fluff.
+    - `cause_summary`: how the regression was INTRODUCED — the root cause in plain language,
+      inferred from the introducing commit + what the fix had to change. 1-3 sentences.
+    - `fix_summary`: how the fix RESOLVES it, read from the fix diff. 1-3 sentences. Be concrete
+      (e.g. "adds an is_object guard before casting to array"). Leave empty only if truly unclear.
 
     Output structure is fixed by the API; follow it exactly.
     """
@@ -35,7 +39,9 @@ JSON_CONTRACT = dedent(
       "introduced_commit": "string (a candidate hash, or empty)",
       "introduced_by": "string (author, or empty)",
       "confidence": integer 0-100,
-      "reasoning": "string"
+      "reasoning": "string",
+      "cause_summary": "string (how it was introduced)",
+      "fix_summary": "string (how it was fixed)"
     }
     """
 ).strip()
