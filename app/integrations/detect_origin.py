@@ -9,7 +9,7 @@ from app.integrations.nvidia import _client as nvidia_client
 from app.integrations.detect_origin_prompt import INSTRUCTIONS, JSON_CONTRACT, build_context
 from app.models.detect_origin import DetectOriginRequest, DetectOriginResponse
 
-_GEMINI_MODEL = "gemini-3.1-flash-lite"
+_GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 
 async def detect_with_gemini(req: DetectOriginRequest) -> dict[str, Any]:
