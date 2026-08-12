@@ -18,8 +18,11 @@ class CrossRepoRequest(BaseModel):
         description="Bitbucket access token (e.g. the Supabase `provider_token`).",
     )
     dry_run: bool = Field(
-        False,
-        description="When true, preview the title changes without writing to Bitbucket.",
+        True,
+        description=(
+            "Preview the title changes without writing to Bitbucket. Defaults to true so a "
+            "caller that omits it cannot rewrite PR titles by accident; pass false to apply."
+        ),
     )
 
 

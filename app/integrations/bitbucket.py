@@ -1,8 +1,11 @@
 import asyncio
+import logging
 import re
 from typing import Any, Optional
 
 import httpx
+
+log = logging.getLogger("bitbucket")
 
 _API_BASE = "https://api.bitbucket.org/2.0"
 _PAGE_LIMIT = 100
@@ -72,7 +75,7 @@ async def _open_prs_for_branch(
     except httpx.HTTPError as e:
         # A single repo failing (permissions, etc.) must not abort the whole search,
         # but log it so real problems are not silently swallowed.
-        print(f"Cross-repo PR lookup failed for {slug}: {e}")
+        log.warning("Cross-repo PR lookup failed for %s: %s", slug, e)
         return []
 
     matches: list[dict[str, str]] = []

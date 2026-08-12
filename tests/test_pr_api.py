@@ -64,3 +64,19 @@ async def test_cross_repo_endpoint_surfaces_bitbucket_error(mock_annotate):
     )
 
     assert response.status_code == 502
+
+
+@pytest.mark.asyncio
+@patch("app.api.v1.pr.annotate_cross_repo_group", new_callable=AsyncMock)
+async def test_cross_repo_endpoint_defaults_to_dry_run(mock_annotate):
+    """Omitting ``dry_run`` must preview, never rewrite PR titles."""
+    mock_annotate.return_value = {"workspace": "bizom", "branch": "feature/x", "members": []}
+
+    client.post(
+        "/pr/cross-repo",
+        json={"pr_url": "https://bitbucket.org/bizom/web/pull-requests/1", "bitbucket_token": "tok"},
+    )
+
+    mock_annotate.assert_awaited_once_with(
+        "https://bitbucket.org/bizom/web/pull-requests/1", "tok", dry_run=True
+    )
