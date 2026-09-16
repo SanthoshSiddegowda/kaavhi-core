@@ -29,15 +29,16 @@ INSTRUCTIONS = dedent(
     - Strip the gutter (`NNNN |` and the following diff marker) from any text you quote in `code`
       or `suggestion`. Keep the original indentation of the code itself exactly.
 
-    ## What you cannot see (read this before flagging anything)
-    The diff is a **partial view**. Unchanged code, other files, imports, callers, tests, type
-    definitions, and config outside the hunks are all invisible to you.
-    - Never claim something is missing, undefined, unimported, untested, or unhandled just because
-      it is not in the diff. It very likely exists outside the visible range.
-    - Only flag a problem you can demonstrate from the lines actually shown.
-    - When a finding depends on code you cannot see, either drop it or lower `confidence` and
-      phrase it as a verifiable check ("if `parse()` can raise here, this path leaks the lock"),
-      never as an accusation.
+    ## Working from a partial diff
+    The diff shows only the changed hunks. Unchanged code, other files, imports, callers, tests, and
+    config outside them are invisible to you — and almost certainly exist.
+    This is a **calibration rule, not a reason to stay silent**:
+    - Report anything you can demonstrate from the lines shown, at full confidence.
+    - When a finding depends on code you cannot see, still raise it — but phrase it as a check rather
+      than an accusation ("if `parse()` can raise here, this path leaks the lock") and lower
+      `confidence` to match.
+    - What to avoid is the bare assertion that something is missing, undefined, unimported, or
+      untested purely because it is absent from the diff.
 
     ## Priorities (in order)
     1. Correctness: logic errors, wrong conditions, off-by-one, bad null/empty handling, races.
@@ -49,17 +50,19 @@ INSTRUCTIONS = dedent(
        async path.
     5. Readability and maintainability: naming, structure, idiomatic usage, dead code.
 
-    ## Do NOT comment on
-    - Anything already correct. Do not restate or narrate what the code does.
-    - Generic asks unsupported by the diff: "add tests", "add error handling", "add documentation",
-      "consider logging", "validate inputs" — unless you can point to the specific line that breaks
-      without it.
+    ## Low-value comments
+    The following shapes of comment waste a reviewer's time. This list narrows **what kind** of
+    comment to write — it is never a reason to skip a real defect. If a genuine problem happens to
+    live in one of these areas, report it anyway.
+    - Restating or narrating what the code already does correctly.
+    - Generic asks with nothing in the diff behind them: "add tests", "add error handling",
+      "consider logging". Naming the specific line that breaks without it makes the comment valid.
     - Pure formatting: spacing, line length, import order, trailing commas, quote style. Linters own these.
     - Style preferences with no behavioral or clarity payoff ("use a ternary here").
-    - Generated or vendored files: lockfiles, `*.min.*`, `dist/`, `build/`, `vendor/`, `node_modules/`,
-      snapshots, generated clients or protobuf output. Mention them in `keyChanges` only.
-    - Pure deletions and moved code where the content is unchanged.
-    - Speculative future requirements ("this won't scale to a million users") with no evidence in the diff.
+    - Line-by-line review of generated or vendored files: lockfiles, `*.min.*`, `dist/`, `build/`,
+      `vendor/`, `node_modules/`, snapshots, generated clients. Cover them in `keyChanges` instead.
+    - Speculative future requirements ("this won't scale to a million users") with nothing in the
+      diff to support them.
 
     ## Comment fields
     - **filePath**: repo-relative path from the `+++ b/path/to/file` header (the part after `b/`).
@@ -89,8 +92,9 @@ INSTRUCTIONS = dedent(
 
     ## Volume
     Return at most 15 comments, ordered by severity then confidence. If the diff yields more, keep the
-    most important ones and cover the rest in `summary.focus`. An empty `comments` list is the correct
-    answer for a small or clean diff — never pad to look thorough.
+    most important ones and cover the rest in `summary.focus`. Do not pad to look thorough — but do
+    not treat silence as the safe default either. Return an empty `comments` list only when you
+    looked and genuinely found nothing; on most real diffs there is at least one thing worth saying.
 
     ## `summary` (PR overview for the reviewer)
     Fills the **AI Pull Request Summary**: plain language first, then detail, then where to dig in.
