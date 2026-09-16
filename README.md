@@ -13,7 +13,11 @@ As part of our commitment to transparency and trust, our core review logic is op
 2. **AI analysis**: The diff is sent to **Google Gemini** using the official [`google-genai`](https://googleapis.github.io/python-genai/) SDK (async). The model returns **structured JSON** constrained by Pydantic schemas: an **AI Pull Request Summary** plus **line-level comments**.
 3. **Return JSON**: The response includes `summary` (overview, key changes, review focus) and `comments` (issues and suggestions with severity, confidence, and code suggestions).
 
-Default model id is configured in `app/integrations/gemini.py` (currently `gemini-3-flash-preview`). You can change it there to match your API access.
+The review model is set by the `GEMINI_MODEL` environment variable (see `app/config/app.py`); it defaults to `gemini-3.5-flash-lite`. Set it in `.env` to match your API access — no code change needed.
+
+If `NVIDIA_API_KEY` is configured, NVIDIA (qwen) is used as a **fallback** when Gemini fails or returns nothing usable. Gemini is always tried first.
+
+Beyond review, the service also exposes regression-origin detection (`/detect-origin`), Bitbucket cross-repo PR linking (`/pr/cross-repo`), and a Bugzilla regression query (`/bugzilla/regression-bugs`).
 
 ## Getting Started
 
@@ -44,7 +48,19 @@ Default model id is configured in `app/integrations/gemini.py` (currently `gemin
    Create a `.env` file in the project root:
 
    ```env
+   # Required
    GEMINI_API_KEY="your-gemini-api-key"
+
+   # Optional — review model (default: gemini-3.5-flash-lite)
+   GEMINI_MODEL="gemini-3.5-flash-lite"
+
+   # Optional — NVIDIA fallback, used only when Gemini fails
+   NVIDIA_API_KEY=""
+   NVIDIA_BASE_URL="https://integrate.api.nvidia.com/v1"
+   NVIDIA_MODEL="qwen/qwen3.5-397b-a17b"
+
+   # Optional — required only for /bugzilla/regression-bugs
+   BUGZILLA_API_KEY=""
    ```
 
 ### Running the Server
@@ -109,9 +125,65 @@ curl -X POST "http://localhost:8000/review/diff" \
 
 Each comment’s **`filePath`** should be repo-relative, taken from the `+++ b/path/to/file` header in the diff (the path after `b/`).
 
+### `POST /detect-origin`
+
+Best-effort regression blame: given a bug, the diff that fixed it, and candidate commits that
+previously touched the same files, returns the commit most likely to have introduced the regression.
+
+```sh
+curl -X POST "http://localhost:8000/detect-origin" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "bug_summary": "Totals round down on the invoice page",
+        "fix_ref": "https://bitbucket.org/acme/billing/pull-requests/42",
+        "fix_diff": "--- a/billing.py\n+++ b/billing.py\n-    return int(total)\n+    return round(total, 2)\n",
+        "candidate_commits": [
+          {"hash": "9f2c1ab", "author": "dev@acme.com", "date": "2026-02-11", "message": "speed up totals", "files": ["billing.py"]}
+        ]
+      }'
+```
+
+Returns `introduced_commit`, `introduced_by`, `confidence` (0–100), `reasoning`, `cause_summary`,
+and `fix_summary`. Every field is best-effort and comes back empty when the signal is too weak.
+
+### `POST /pr/cross-repo`
+
+Finds every open PR sharing the source branch of `pr_url` across the workspace and cross-links the
+group by appending `🔗 Cross-repo PR: <url>` to each title. Idempotent — urls already present are
+not appended again.
+
+```sh
+curl -X POST "http://localhost:8000/pr/cross-repo" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "pr_url": "https://bitbucket.org/acme/billing/pull-requests/42",
+        "bitbucket_token": "your-bitbucket-access-token",
+        "dry_run": true
+      }'
+```
+
+`dry_run` **defaults to `true`** so a caller that omits it cannot rewrite PR titles by accident.
+Pass `false` to apply. The response lists each group member with its `old_title`, `new_title`,
+`changed`, and `updated`.
+
+### `POST /bugzilla/regression-bugs`
+
+Queries Bugzilla for regression bugs in a version over a date range. Requires `BUGZILLA_API_KEY`.
+
+```sh
+curl -X POST "http://localhost:8000/bugzilla/regression-bugs" \
+  -H "Content-Type: application/json" \
+  -d '{"version": "24.10", "chfieldfrom": "2026-01-01", "chfieldto": "2026-03-31"}'
+```
+
 ### `GET /`
 
 Health check — returns `{ "status": "ok" }`.
+
+### `GET /ip`
+
+Returns the server's outbound IP (via `api.ipify.org`) — useful for allowlisting Kaavhi with a
+self-hosted Bitbucket or Bugzilla instance.
 
 ## CORS
 
@@ -134,15 +206,18 @@ MIT — see [LICENSE](LICENSE).
 ## Project structure
 
 - `app/main.py` — FastAPI app, CORS, router mount
-- `app/api/v1/review.py` — `/review/diff` endpoint
-- `app/integrations/gemini.py` — Gemini client, prompt, structured output
-- `app/models/review.py` — Pydantic models (`ReviewResponse`, `PullRequestSummary`, `ReviewComment`)
-- `app/services/review_service.py` — Review orchestration
+- `app/api/v1/` — endpoints: `review.py`, `detect_origin.py`, `pr.py`, `bugzilla.py`
+- `app/integrations/gemini.py` — Gemini client and structured output
+- `app/integrations/nvidia.py` — NVIDIA (qwen) fallback provider
+- `app/integrations/review_prompt.py` — shared review instructions and diff line annotation
+- `app/integrations/bitbucket.py` — Bitbucket API client (cross-repo PR linking)
+- `app/models/` — Pydantic models (`ReviewResponse`, `PullRequestSummary`, `ReviewComment`, detect-origin)
+- `app/services/` — Review and detect-origin orchestration
 - `app/middleware/` — CORS middleware
-- `app/config/` — Settings (e.g. `GEMINI_API_KEY`)
+- `app/config/` — Settings (`GEMINI_API_KEY`, `GEMINI_MODEL`, `NVIDIA_*`, `BUGZILLA_API_KEY`)
 - `requirements.txt` — Dependencies (`fastapi`, `google-genai`, `python-multipart`, etc.)
 - `tests/` — `pytest` suite
 
 ## Releases
 
-See [GitHub Releases](https://github.com/SanthoshSiddegowda/kaavhi-core/releases) for version notes (e.g. **v1.2.0**: summary + focus, structured Gemini output, middleware layout).
+See [GitHub Releases](https://github.com/SanthoshSiddegowda/kaavhi-core/releases) for version notes (latest: **v1.3.0** — line-annotated diffs for accurate inline comments, a tighter review prompt, `/detect-origin`, and `/pr/cross-repo`).

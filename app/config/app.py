@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-3.5-flash-lite"
     BUGZILLA_API_KEY: str = ""
 
-    # NVIDIA (primary review provider; falls back to Gemini when unset or failing).
+    # NVIDIA (qwen) fallback; used only when Gemini fails or returns nothing usable.
     NVIDIA_API_KEY: str = ""
     NVIDIA_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
     NVIDIA_MODEL: str = "qwen/qwen3.5-397b-a17b"
