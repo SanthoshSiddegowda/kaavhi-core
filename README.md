@@ -13,7 +13,7 @@ As part of our commitment to transparency and trust, our core review logic is op
 2. **AI analysis**: The diff is sent to **Google Gemini** using the official [`google-genai`](https://googleapis.github.io/python-genai/) SDK (async). The model returns **structured JSON** constrained by Pydantic schemas: an **AI Pull Request Summary** plus **line-level comments**.
 3. **Return JSON**: The response includes `summary` (overview, key changes, review focus) and `comments` (issues and suggestions with severity, confidence, and code suggestions).
 
-The review model is set by the `GEMINI_MODEL` environment variable (see `app/config/app.py`); it defaults to `gemini-3.8-flash`. Set it in `.env` to match your API access — no code change needed.
+The review model is set by the `GEMINI_MODEL` environment variable (see `app/config/app.py`); it defaults to `gemini-3.5-flash-lite`. Set it in `.env` to match your API access — no code change needed.
 
 If `NVIDIA_API_KEY` is configured, NVIDIA (qwen) is used as a **fallback** when Gemini fails or returns nothing usable. Gemini is always tried first.
 
@@ -51,8 +51,8 @@ Beyond review, the service also exposes regression-origin detection (`/detect-or
    # Required
    GEMINI_API_KEY="your-gemini-api-key"
 
-   # Optional — review model (default: gemini-3.8-flash)
-   GEMINI_MODEL="gemini-3.8-flash"
+   # Optional — review model (default: gemini-3.5-flash-lite)
+   GEMINI_MODEL="gemini-3.5-flash-lite"
 
    # Optional — NVIDIA fallback, used only when Gemini fails
    NVIDIA_API_KEY=""

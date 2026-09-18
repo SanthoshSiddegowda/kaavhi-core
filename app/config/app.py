@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     Manages application settings and environment variables.
     """
     GEMINI_API_KEY: str
-    GEMINI_MODEL: str = "gemini-3.8-flash"
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
     BUGZILLA_API_KEY: str = ""
 
     # NVIDIA (qwen) fallback; used only when Gemini fails or returns nothing usable.
