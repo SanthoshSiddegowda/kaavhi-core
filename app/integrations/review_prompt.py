@@ -187,3 +187,39 @@ def annotate_diff(diff: str) -> str:
 def build_diff_prompt(diff: str) -> str:
     """User-facing content: the line-annotated diff under a clear header."""
     return f"## Diff (line-annotated)\n\n{annotate_diff(diff)}\n"
+
+
+_GIT_HEADER_RE = re.compile(r"^diff --git .*$", re.M)
+_OLD_HEADER_RE = re.compile(r"^--- .*$", re.M)
+
+
+def split_by_file(diff: str) -> list[str]:
+    """
+    Split a unified diff into one standalone chunk per file.
+
+    Reviewing a whole PR in a single prompt dilutes findings: the same bug scored two
+    comments on its own and one when buried in a 947-line diff. One call per file keeps
+    each review's input small enough that nothing gets crowded out.
+
+    Handles both ``diff --git`` output (Bitbucket, git) and the bare ``---``/``+++`` form.
+    Returns ``[diff]`` unchanged when the format is unrecognized or there is only one file,
+    so an unsplittable diff still gets reviewed whole.
+    """
+    starts = [m.start() for m in _GIT_HEADER_RE.finditer(diff)]
+
+    if not starts:
+        # Bare form: a `--- ` header only starts a file when `+++ ` follows it. A removed
+        # line of dashes can look like a header, so require the pair.
+        lines = diff.splitlines(keepends=True)
+        offset, starts = 0, []
+        for i, line in enumerate(lines):
+            if (_OLD_HEADER_RE.match(line.rstrip("\n"))
+                    and i + 1 < len(lines) and lines[i + 1].startswith("+++ ")):
+                starts.append(offset)
+            offset += len(line)
+
+    if len(starts) < 2:
+        return [diff]
+
+    bounds = starts + [len(diff)]
+    return [diff[a:b] for a, b in zip(bounds, bounds[1:]) if diff[a:b].strip()]

@@ -52,3 +52,33 @@ async def review_with_gemini(diff: str) -> dict[str, Any]:
     except Exception as e:
         print(f"Error calling Gemini: {e}")
         return {"comments": [], "summary": _EMPTY_SUMMARY}
+
+
+_SUMMARY_PROMPT = (
+    "Below are the key changes from each file of one pull request, reviewed separately.\n"
+    "Write the PR overview: 2-4 short sentences, plain everyday language, describing what "
+    "the pull request does as a whole. No bullet points, no preamble, no restating the list."
+)
+
+
+async def summarize_key_changes(key_changes: list[str]) -> str:
+    """
+    Write one overview across per-file reviews.
+
+    Each file is reviewed in its own call, so no single call sees the whole PR. This is a
+    small extra request purely to produce the cross-file ``summary.overview``.
+    """
+    if not key_changes:
+        return ""
+
+    bullets = "\n".join(f"- {c}" for c in key_changes)
+    try:
+        response = await client.aio.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=f"{_SUMMARY_PROMPT}\n\n{bullets}",
+        )
+        return (response.text or "").strip()
+    except Exception as e:  # noqa: BLE001 — an overview is not worth failing the review
+        print(f"Error summarizing key changes: {e}")
+        # Falling back to the raw list is worse than nothing for a prose field.
+        return ""
