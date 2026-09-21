@@ -117,3 +117,33 @@ async def test_all_files_failing_returns_empty_schema_valid_review():
 
     assert result == {"comments": [],
                       "summary": {"overview": "", "keyChanges": [], "focus": []}}
+
+
+def _c(severity, confidence=80, anchor="replace"):
+    return {
+        "id": "1", "type": "issue", "severity": severity, "line": 1, "code": "x",
+        "comment": "c", "suggestion": "y", "anchor": anchor,
+        "confidence": confidence, "filePath": "f",
+    }
+
+
+def test_low_comments_are_budgeted():
+    """Per-file reviews each emit a style note; only a few may survive the merge."""
+    reviews = [{"comments": [_c("low", 90)], "summary": {}} for _ in range(8)]
+    merged = _merge(reviews, file_count=8)
+    assert len(merged["comments"]) == 3
+
+
+def test_low_comments_dropped_on_large_prs():
+    reviews = [{"comments": [_c("low", 90)], "summary": {}} for _ in range(12)]
+    merged = _merge(reviews, file_count=12)
+    assert merged["comments"] == []
+
+
+def test_low_budget_never_displaces_real_findings():
+    reviews = ([{"comments": [_c("low", 99)], "summary": {}} for _ in range(8)]
+               + [{"comments": [_c("high", 50)], "summary": {}}])
+    merged = _merge(reviews, file_count=9)
+    severities = [c["severity"] for c in merged["comments"]]
+    assert severities.count("high") == 1, "a high finding must survive a flood of low ones"
+    assert severities.count("low") == 3

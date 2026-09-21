@@ -71,10 +71,25 @@ INSTRUCTIONS = dedent(
     - **code**: the minimal excerpt from the new version you are discussing, gutter stripped.
     - **comment**: specific and actionable. Lead with the problem, then why it matters when it is not
       obvious. No praise, no preamble, no hedging stacked on hedging. 1–4 sentences.
-    - **suggestion**: replacement code only — no prose, no markdown fences, no "consider…". It must
-      be a drop-in replacement for the line(s) in `code`, with matching indentation. If no code fix
-      applies (e.g. the fix is architectural, or the ask is to verify something), return an empty
-      string rather than inventing plausible-looking code.
+    - **suggestion**: code only — no prose, no markdown fences, no "consider…". Keep the exact
+      indentation the file uses. If no code fix applies (the fix is architectural, or you are
+      asking the reviewer to verify something), return an empty string rather than inventing
+      plausible-looking code.
+    - **anchor**: how `suggestion` applies to `line`. **Getting this wrong corrupts the file**,
+      because the suggestion replaces the lines it is anchored to.
+      - `replace` — `suggestion` replaces exactly the lines in `code`. Use it only when
+        `suggestion` is a complete stand-in for that code: if `code` is one line, `suggestion`
+        must be the rewritten version of that same line, not something to add near it.
+      - `insert_before` — `suggestion` is new code to go immediately above `line`; the line in
+        `code` stays. Use this for a guard, a check, or a validation added ahead of existing code.
+      - `insert_after` — `suggestion` is new code to go immediately below `line`; the line in
+        `code` stays.
+      Test yourself before answering: if applying `replace` would delete a line that must survive
+      (a loop header, a function signature, an opening brace), the anchor is an insert, not a
+      replace.
+      For either insert, `suggestion` must contain **only the new lines**. Never repeat the line
+      from `code` inside an insert — the anchored line stays where it is, so including it again
+      duplicates it.
     - **type**: `issue` for a defect or material risk; `suggestion` for an improvement that is not wrong today.
     - **severity**:
       - `high` — security hole, data loss or corruption, crash, breaking contract change, clear bug on a
@@ -129,7 +144,8 @@ JSON_CONTRACT = dedent(
           "line": integer,
           "code": "string",
           "comment": "string",
-          "suggestion": "string (replacement code only, may be empty)",
+          "suggestion": "string (code only, may be empty)",
+          "anchor": "replace" | "insert_before" | "insert_after",
           "confidence": integer 0-100,
           "filePath": "string"
         }

@@ -13,6 +13,13 @@ log = logging.getLogger("review_service")
 # total cap a 20-file PR could return 300 comments.
 MAX_COMMENTS = 15
 
+# Per-file review reintroduces low-severity noise the single-prompt version suppressed: each
+# file gets its own reviewer, and each one wants to say something. Budget `low` separately so
+# style observations on files nobody cares about cannot crowd out real defects.
+MAX_LOW_COMMENTS = 3
+# Above this many files, drop `low` entirely — a large PR needs signal, not style notes.
+LOW_COMMENT_FILE_LIMIT = 10
+
 _SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
 _EMPTY: dict[str, Any] = {
@@ -55,12 +62,13 @@ async def _review_chunk(diff: str) -> dict[str, Any]:
     return {"comments": [], "summary": {"overview": "", "keyChanges": [], "focus": []}}
 
 
-def _merge(reviews: list[dict[str, Any]]) -> dict[str, Any]:
+def _merge(reviews: list[dict[str, Any]], file_count: int = 1) -> dict[str, Any]:
     """
     Combine per-file reviews into one response.
 
     Comment ids are rewritten: each file is reviewed independently, so several chunks
-    happily return an id of "1" and the frontend needs them unique.
+    happily return an id of "1" and the frontend needs them unique. ``low`` comments are
+    budgeted separately so per-file style notes cannot crowd out real defects.
     """
     comments, key_changes, focus = [], [], []
     for review in reviews:
@@ -72,12 +80,23 @@ def _merge(reviews: list[dict[str, Any]]) -> dict[str, Any]:
     comments.sort(
         key=lambda c: (_SEVERITY_RANK.get(c.get("severity"), 3), -c.get("confidence", 0))
     )
-    comments = comments[:MAX_COMMENTS]
-    for i, comment in enumerate(comments, start=1):
+
+    low_budget = 0 if file_count > LOW_COMMENT_FILE_LIMIT else MAX_LOW_COMMENTS
+    kept: list[dict[str, Any]] = []
+    for comment in comments:
+        if comment.get("severity") == "low":
+            if low_budget == 0:
+                continue
+            low_budget -= 1
+        kept.append(comment)
+        if len(kept) == MAX_COMMENTS:
+            break
+
+    for i, comment in enumerate(kept, start=1):
         comment["id"] = str(i)
 
     return {
-        "comments": comments,
+        "comments": kept,
         "summary": {"overview": "", "keyChanges": key_changes, "focus": focus},
     }
 
@@ -109,7 +128,7 @@ async def review_diff(diff: str) -> dict[str, Any]:
     if not any(_has_content(r) for r in reviews):
         return dict(_EMPTY, summary=dict(_EMPTY["summary"]))
 
-    merged = _merge(reviews)
+    merged = _merge(reviews, file_count=len(chunks))
     merged["summary"]["overview"] = await summarize_key_changes(
         merged["summary"]["keyChanges"]
     )

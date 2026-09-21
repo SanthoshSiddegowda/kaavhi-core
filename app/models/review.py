@@ -1,6 +1,6 @@
 from typing import List, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ReviewRequest(BaseModel):
@@ -18,8 +18,39 @@ class ReviewComment(BaseModel):
         ...,
         description="Replacement code only; no prose or markdown fences.",
     )
+    anchor: Literal["replace", "insert_before", "insert_after"] = Field(
+        "replace",
+        description=(
+            "How ``suggestion`` applies to ``line``. Bitbucket suggestion blocks replace the "
+            "lines they are anchored to, so an insert-shaped fix emitted as ``replace`` "
+            "silently deletes the anchored line. Defaults to ``replace``."
+        ),
+    )
     confidence: int = Field(..., ge=0, le=100)
     filePath: str
+
+    @model_validator(mode="after")
+    def _drop_anchor_line_from_inserts(self) -> "ReviewComment":
+        """
+        Strip the anchored line when an insert repeats it.
+
+        The prompt tells the model an insert must carry only new lines, but it still leads
+        with the anchored line often enough to matter, and applying that duplicates the line.
+        Cheaper to normalize here than to trust the instruction: this runs for every provider.
+        """
+        if self.anchor == "replace" or not self.suggestion.strip():
+            return self
+
+        anchor_line = self.code.strip()
+        if not anchor_line:
+            return self
+
+        lines = self.suggestion.split("\n")
+        if self.anchor == "insert_after" and lines[0].strip() == anchor_line:
+            self.suggestion = "\n".join(lines[1:]).rstrip()
+        elif self.anchor == "insert_before" and lines[-1].strip() == anchor_line:
+            self.suggestion = "\n".join(lines[:-1]).rstrip()
+        return self
 
 
 class PullRequestSummary(BaseModel):
