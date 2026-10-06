@@ -53,6 +53,14 @@ class ReviewComment(BaseModel):
         return self
 
 
+class ChangeIntent(BaseModel):
+    """One reason the PR exists, and the files that serve it."""
+
+    title: str = Field(..., description="Short imperative label, e.g. 'Add retry to webhook sender'.")
+    why: str = Field(..., description="One plain sentence: what this group of changes achieves.")
+    files: List[str] = Field(..., description="Paths, copied exactly from the input, that serve this intent.")
+
+
 class PullRequestSummary(BaseModel):
     """
     AI Pull Request Summary for reviewers — ``overview`` + ``keyChanges`` + ``focus``.
@@ -80,14 +88,14 @@ class PullRequestSummary(BaseModel):
             "worth a deeper pass (e.g. security-sensitive paths, API contracts, new logic)."
         ),
     )
-
-
-class ChangeIntent(BaseModel):
-    """One reason the PR exists, and the files that serve it."""
-
-    title: str = Field(..., description="Short imperative label, e.g. 'Add retry to webhook sender'.")
-    why: str = Field(..., description="One plain sentence: what this group of changes achieves.")
-    files: List[str] = Field(..., description="Paths, copied exactly from the input, that serve this intent.")
+    intents: List[ChangeIntent] = Field(
+        default_factory=list,
+        description=(
+            "Files grouped by why they changed, written by the cross-file pass. Empty for "
+            "single-file diffs. Optional so the per-file review schema is not asked for it; "
+            "review_diff overwrites whatever a per-file call puts here."
+        ),
+    )
 
 
 class PullRequestOverview(BaseModel):
