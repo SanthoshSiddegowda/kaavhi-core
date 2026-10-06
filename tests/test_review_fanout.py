@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.integrations.review_prompt import split_by_file
-from app.services.review_service import _merge, review_diff
+from app.services.review_service import _clean_intents, _merge, review_diff
 
 GIT_DIFF = """diff --git a/a.py b/a.py
 --- a/a.py
@@ -86,24 +86,32 @@ def test_merge_caps_total_comments():
 @pytest.mark.asyncio
 async def test_review_diff_fans_out_per_file():
     with patch("app.services.review_service._review_chunk", new_callable=AsyncMock) as chunk, \
-         patch("app.services.review_service.summarize_key_changes",
+         patch("app.services.review_service.summarize_pr",
                new_callable=AsyncMock) as summarize:
         chunk.return_value = _review("high", 90)
-        summarize.return_value = "combined overview"
+        summarize.return_value = {"overview": "combined overview", "intents": [
+            {"title": "Bump x", "why": "w", "files": ["a.py", "ghost.py"]}]}
         result = await review_diff(GIT_DIFF)
 
     assert chunk.await_count == 2, "one model call per file"
     assert result["summary"]["overview"] == "combined overview"
     assert len(result["comments"]) == 2
+    # Unknown path dropped; the unclaimed file is kept under "Other changes".
+    assert result["summary"]["intents"] == [
+        {"title": "Bump x", "why": "w", "files": ["a.py"]},
+        {"title": "Other changes", "why": "", "files": ["b.py"]},
+    ]
+    sent = summarize.await_args.args[0]
+    assert list(sent) == ["a.py", "b.py"], "summary call sees each file's path"
 
 
 @pytest.mark.asyncio
 async def test_one_failing_file_does_not_lose_the_others():
     with patch("app.services.review_service._review_chunk", new_callable=AsyncMock) as chunk, \
-         patch("app.services.review_service.summarize_key_changes",
+         patch("app.services.review_service.summarize_pr",
                new_callable=AsyncMock) as summarize:
         chunk.side_effect = [RuntimeError("boom"), _review("high", 90)]
-        summarize.return_value = "overview"
+        summarize.return_value = {"overview": "overview", "intents": []}
         result = await review_diff(GIT_DIFF)
 
     assert len(result["comments"]) == 1
@@ -147,3 +155,13 @@ def test_low_budget_never_displaces_real_findings():
     severities = [c["severity"] for c in merged["comments"]]
     assert severities.count("high") == 1, "a high finding must survive a flood of low ones"
     assert severities.count("low") == 3
+
+
+def test_clean_intents_puts_each_file_in_one_group():
+    intents = [
+        {"title": "A", "why": "", "files": ["x.py", "y.py"]},
+        {"title": "B", "why": "", "files": ["y.py"]},  # y already claimed -> B empty, dropped
+    ]
+    assert _clean_intents(intents, ["x.py", "y.py"]) == [
+        {"title": "A", "why": "", "files": ["x.py", "y.py"]},
+    ]

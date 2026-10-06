@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 from app.config.app import settings
 from app.integrations.review_prompt import INSTRUCTIONS, build_diff_prompt
-from app.models.review import ReviewResponse
+from app.models.review import PullRequestOverview, ReviewResponse
 
 # The client is initialized here using the key from the centralized settings.
 # Pydantic automatically validates that the key exists.
@@ -56,29 +56,45 @@ async def review_with_gemini(diff: str) -> dict[str, Any]:
 
 _SUMMARY_PROMPT = (
     "Below are the key changes from each file of one pull request, reviewed separately.\n"
-    "Write the PR overview: 2-4 short sentences, plain everyday language, describing what "
-    "the pull request does as a whole. No bullet points, no preamble, no restating the list."
+    "1. overview: 2-4 short sentences, plain everyday language, describing what the pull "
+    "request does as a whole. No bullet points, no preamble, no restating the list.\n"
+    "2. intents: group the files by the reason they changed, not by folder or file type. "
+    "One intent per distinct goal (a feature, a fix, a refactor, test or config support for "
+    "one of those). Usually 1-5 intents; a file that only serves one goal belongs with it. "
+    "Every file goes in exactly one intent. Copy paths exactly as given. Order intents so "
+    "the core change comes first and supporting changes after."
 )
 
 
-async def summarize_key_changes(key_changes: list[str]) -> str:
+async def summarize_pr(key_changes_by_file: dict[str, list[str]]) -> dict[str, Any]:
     """
-    Write one overview across per-file reviews.
+    Write the cross-file overview and group files by intent.
 
-    Each file is reviewed in its own call, so no single call sees the whole PR. This is a
-    small extra request purely to produce the cross-file ``summary.overview``.
+    Each file is reviewed in its own call, so no single call sees the whole PR. This one
+    small request sees every file's key changes and produces what needs that view:
+    ``overview`` and ``intents``. Returns ``{"overview": "", "intents": []}`` on failure.
     """
-    if not key_changes:
-        return ""
+    empty: dict[str, Any] = {"overview": "", "intents": []}
+    if not any(key_changes_by_file.values()):
+        return empty
 
-    bullets = "\n".join(f"- {c}" for c in key_changes)
+    listing = "\n\n".join(
+        f"File: {path}\n" + "\n".join(f"- {c}" for c in changes)
+        for path, changes in key_changes_by_file.items()
+    )
     try:
         response = await client.aio.models.generate_content(
             model=settings.GEMINI_MODEL,
-            contents=f"{_SUMMARY_PROMPT}\n\n{bullets}",
+            contents=f"{_SUMMARY_PROMPT}\n\n{listing}",
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=PullRequestOverview,
+            ),
         )
-        return (response.text or "").strip()
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, PullRequestOverview):
+            return parsed.model_dump()
+        return PullRequestOverview.model_validate_json(response.text or "").model_dump()
     except Exception as e:  # noqa: BLE001 — an overview is not worth failing the review
-        print(f"Error summarizing key changes: {e}")
-        # Falling back to the raw list is worse than nothing for a prose field.
-        return ""
+        print(f"Error summarizing pull request: {e}")
+        return empty

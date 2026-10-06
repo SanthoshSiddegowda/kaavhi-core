@@ -82,6 +82,21 @@ class PullRequestSummary(BaseModel):
     )
 
 
+class ChangeIntent(BaseModel):
+    """One reason the PR exists, and the files that serve it."""
+
+    title: str = Field(..., description="Short imperative label, e.g. 'Add retry to webhook sender'.")
+    why: str = Field(..., description="One plain sentence: what this group of changes achieves.")
+    files: List[str] = Field(..., description="Paths, copied exactly from the input, that serve this intent.")
+
+
+class PullRequestOverview(BaseModel):
+    """Cross-file pass, written once per PR from the per-file key changes."""
+
+    overview: str
+    intents: List[ChangeIntent]
+
+
 class ReviewResponse(BaseModel):
     comments: List[ReviewComment]
     summary: PullRequestSummary = Field(

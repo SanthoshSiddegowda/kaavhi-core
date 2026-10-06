@@ -1,9 +1,10 @@
 import asyncio
 import logging
+import re
 from typing import Any
 
 from app.config.app import settings
-from app.integrations.gemini import review_with_gemini, summarize_key_changes
+from app.integrations.gemini import review_with_gemini, summarize_pr
 from app.integrations.nvidia import review_with_nvidia
 from app.integrations.review_prompt import split_by_file
 
@@ -101,13 +102,42 @@ def _merge(reviews: list[dict[str, Any]], file_count: int = 1) -> dict[str, Any]
     }
 
 
+_PATH_RE = re.compile(r"^diff --git .* b/(.+)$|^\+\+\+ b/(.+)$", re.M)
+
+
+def _chunk_path(chunk: str) -> str:
+    """New-side path of a one-file chunk (``diff --git`` header first, so deletions resolve too)."""
+    m = _PATH_RE.search(chunk)
+    return (m.group(1) or m.group(2)).strip() if m else ""
+
+
+def _clean_intents(intents: list[dict[str, Any]], paths: list[str]) -> list[dict[str, Any]]:
+    """
+    Make the model's grouping safe to render: unknown paths dropped, each file in exactly
+    one intent (first claim wins), empty intents removed, and anything left unclaimed
+    collected under "Other changes" so no file disappears from the review.
+    """
+    known, claimed, out = set(paths), set(), []
+    for intent in intents:
+        files = [f for f in intent.get("files") or [] if f in known and f not in claimed]
+        if not files:
+            continue
+        claimed.update(files)
+        out.append({"title": intent.get("title", ""), "why": intent.get("why", ""), "files": files})
+    rest = [p for p in paths if p not in claimed]
+    if rest:
+        out.append({"title": "Other changes", "why": "", "files": rest})
+    return out
+
+
 async def review_diff(diff: str) -> dict[str, Any]:
     """
     Review a diff, one model call per file, in parallel.
 
     Single-file diffs take the same path as before. Multi-file diffs are split so each
     file is reviewed against its own prompt, then merged — reviewing a large PR in one
-    prompt measurably loses findings.
+    prompt measurably loses findings. A final small call writes the overview and groups
+    the files by intent; single-file diffs get no intents (there is nothing to group).
     """
     chunks = split_by_file(diff)
     if len(chunks) < 2:
@@ -118,19 +148,25 @@ async def review_diff(diff: str) -> dict[str, Any]:
     )
 
     reviews: list[dict[str, Any]] = []
-    for chunk_result in results:
+    key_changes_by_file: dict[str, list[str]] = {}
+    for chunk, chunk_result in zip(chunks, results):
+        path = _chunk_path(chunk)
         if isinstance(chunk_result, BaseException):
             # One file failing must not lose the other files' findings.
             log.warning("Chunk review failed (%s)", chunk_result)
+            key_changes_by_file.setdefault(path, [])
             continue
         reviews.append(chunk_result)
+        key_changes_by_file[path] = (chunk_result.get("summary") or {}).get("keyChanges") or []
 
     if not any(_has_content(r) for r in reviews):
         return dict(_EMPTY, summary=dict(_EMPTY["summary"]))
 
     merged = _merge(reviews, file_count=len(chunks))
-    merged["summary"]["overview"] = await summarize_key_changes(
-        merged["summary"]["keyChanges"]
+    pr = await summarize_pr(key_changes_by_file)
+    merged["summary"]["overview"] = pr["overview"]
+    merged["summary"]["intents"] = _clean_intents(
+        pr["intents"], [p for p in key_changes_by_file if p]
     )
     return merged
 
