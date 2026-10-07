@@ -124,6 +124,11 @@ def _clean_intents(intents: list[dict[str, Any]], paths: list[str]) -> list[dict
             continue
         claimed.update(files)
         out.append({"title": intent.get("title", ""), "why": intent.get("why", ""), "files": files})
+    # Nothing was grouped at all — the model returned no intents, or none of its
+    # paths matched. "Other changes" only means something next to a real group;
+    # alone it is a label over the whole diff that says nothing.
+    if not out:
+        return []
     rest = [p for p in paths if p not in claimed]
     if rest:
         out.append({"title": "Other changes", "why": "", "files": rest})
@@ -134,37 +139,49 @@ async def review_diff(diff: str) -> dict[str, Any]:
     """
     Review a diff, one model call per file, in parallel.
 
-    Single-file diffs take the same path as before. Multi-file diffs are split so each
-    file is reviewed against its own prompt, then merged — reviewing a large PR in one
-    prompt measurably loses findings. A final small call writes the overview and groups
-    the files by intent; single-file diffs get no intents (there is nothing to group).
+    Multi-file diffs are split so each file is reviewed against its own prompt, then
+    merged — reviewing a large PR in one prompt measurably loses findings. A single-file
+    diff skips the split and is reviewed whole.
+
+    Both then take the same tail: one small call writes the overview and groups the files
+    by intent. A single-file diff can only produce one intent, since an intent is a set of
+    files, but that one still gives the diff a title and a reason instead of a bare path —
+    and it keeps the client from having two layouts to render.
     """
     chunks = split_by_file(diff)
-    if len(chunks) < 2:
-        return await _review_chunk(diff)
-
-    results = await asyncio.gather(
-        *(_review_chunk(chunk) for chunk in chunks), return_exceptions=True
-    )
-
-    reviews: list[dict[str, Any]] = []
     key_changes_by_file: dict[str, list[str]] = {}
-    for chunk, chunk_result in zip(chunks, results):
-        path = _chunk_path(chunk)
-        if isinstance(chunk_result, BaseException):
-            # One file failing must not lose the other files' findings.
-            log.warning("Chunk review failed (%s)", chunk_result)
-            key_changes_by_file.setdefault(path, [])
-            continue
-        reviews.append(chunk_result)
-        key_changes_by_file[path] = (chunk_result.get("summary") or {}).get("keyChanges") or []
 
-    if not any(_has_content(r) for r in reviews):
-        return dict(_EMPTY, summary=dict(_EMPTY["summary"]))
+    if len(chunks) < 2:
+        merged = await _review_chunk(diff)
+        if not _has_content(merged):
+            return merged
+        key_changes_by_file[_chunk_path(chunks[0]) if chunks else ""] = (
+            (merged.get("summary") or {}).get("keyChanges") or []
+        )
+    else:
+        results = await asyncio.gather(
+            *(_review_chunk(chunk) for chunk in chunks), return_exceptions=True
+        )
 
-    merged = _merge(reviews, file_count=len(chunks))
+        reviews: list[dict[str, Any]] = []
+        for chunk, chunk_result in zip(chunks, results):
+            path = _chunk_path(chunk)
+            if isinstance(chunk_result, BaseException):
+                # One file failing must not lose the other files' findings.
+                log.warning("Chunk review failed (%s)", chunk_result)
+                key_changes_by_file.setdefault(path, [])
+                continue
+            reviews.append(chunk_result)
+            key_changes_by_file[path] = (chunk_result.get("summary") or {}).get("keyChanges") or []
+
+        if not any(_has_content(r) for r in reviews):
+            return dict(_EMPTY, summary=dict(_EMPTY["summary"]))
+
+        merged = _merge(reviews, file_count=len(chunks))
+
     pr = await summarize_pr(key_changes_by_file)
-    merged["summary"]["overview"] = pr["overview"]
+    if pr["overview"]:
+        merged["summary"]["overview"] = pr["overview"]
     merged["summary"]["intents"] = _clean_intents(
         pr["intents"], [p for p in key_changes_by_file if p]
     )
